@@ -1,0 +1,141 @@
+-- ====================================================================
+-- SCHEMA CREATION & SETUP (EXERCISE 3)
+-- ====================================================================
+
+CREATE TABLE Accounts (
+    AccountID NUMBER PRIMARY KEY,
+    CustomerID NUMBER,
+    AccountType VARCHAR2(20),
+    Balance NUMBER,
+    LastModified DATE
+    -- FOREIGN KEY (CustomerID) REFERENCES Customers(CustomerID) (Optional depending on setup)
+);
+
+CREATE TABLE Employees (
+    EmployeeID NUMBER PRIMARY KEY,
+    Name VARCHAR2(100),
+    Position VARCHAR2(50),
+    Salary NUMBER,
+    Department VARCHAR2(50),
+    HireDate DATE
+);
+
+-- Insert Sample Data
+INSERT INTO Accounts (AccountID, CustomerID, AccountType, Balance, LastModified)
+VALUES (1, 1, 'Savings', 1000, SYSDATE);
+
+INSERT INTO Accounts (AccountID, CustomerID, AccountType, Balance, LastModified)
+VALUES (2, 2, 'Checking', 1500, SYSDATE);
+
+INSERT INTO Employees (EmployeeID, Name, Position, Salary, Department, HireDate)
+VALUES (1, 'Alice Johnson', 'Manager', 70000, 'HR', TO_DATE('2015-06-15', 'YYYY-MM-DD'));
+
+INSERT INTO Employees (EmployeeID, Name, Position, Salary, Department, HireDate)
+VALUES (2, 'Bob Brown', 'Developer', 60000, 'IT', TO_DATE('2017-03-20', 'YYYY-MM-DD'));
+
+COMMIT;
+
+SET SERVEROUTPUT ON;
+
+-- ====================================================================
+-- SCENARIO 1: Process Monthly Interest for Savings Accounts
+-- ====================================================================
+CREATE OR REPLACE PROCEDURE ProcessMonthlyInterest AS
+BEGIN
+    -- Updates all savings accounts by adding 1% interest to the current balance
+    UPDATE Accounts
+    SET Balance = Balance * 1.01,
+        LastModified = SYSDATE
+    WHERE AccountType = 'Savings';
+    
+    DBMS_OUTPUT.PUT_LINE('Monthly interest of 1% processed for all Savings accounts.');
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Error processing monthly interest: ' || SQLERRM);
+END;
+/
+
+-- ====================================================================
+-- SCENARIO 2: Update Employee Bonus Scheme
+-- ====================================================================
+CREATE OR REPLACE PROCEDURE UpdateEmployeeBonus (
+    p_Department IN VARCHAR2,
+    p_BonusPercentage IN NUMBER
+) AS
+BEGIN
+    -- Updates salary by adding the bonus percentage (e.g., passing 5 adding 5%)
+    UPDATE Employees
+    SET Salary = Salary * (1 + (p_BonusPercentage / 100))
+    WHERE Department = p_Department;
+    
+    DBMS_OUTPUT.PUT_LINE('Bonus of ' || p_BonusPercentage || '% applied to department: ' || p_Department);
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Error updating employee bonus: ' || SQLERRM);
+END;
+/
+
+-- ====================================================================
+-- SCENARIO 3: Fund Transfer Between Accounts
+-- ====================================================================
+CREATE OR REPLACE PROCEDURE TransferFunds (
+    p_SourceAccountID IN NUMBER,
+    p_DestAccountID   IN NUMBER,
+    p_Amount          IN NUMBER
+) AS
+    v_SourceBalance NUMBER;
+    v_AccountExists NUMBER;
+    insufficient_funds EXCEPTION;
+    invalid_account EXCEPTION;
+BEGIN
+    -- 1. Check if both accounts exist
+    SELECT COUNT(*) INTO v_AccountExists FROM Accounts WHERE AccountID IN (p_SourceAccountID, p_DestAccountID);
+    IF v_AccountExists < 2 THEN
+        RAISE invalid_account;
+    END IF;
+
+    -- 2. Check source balance
+    SELECT Balance INTO v_SourceBalance FROM Accounts WHERE AccountID = p_SourceAccountID FOR UPDATE;
+    
+    IF v_SourceBalance < p_Amount THEN
+        RAISE insufficient_funds;
+    END IF;
+
+    -- 3. Execute Transfer
+    UPDATE Accounts SET Balance = Balance - p_Amount, LastModified = SYSDATE WHERE AccountID = p_SourceAccountID;
+    UPDATE Accounts SET Balance = Balance + p_Amount, LastModified = SYSDATE WHERE AccountID = p_DestAccountID;
+    
+    DBMS_OUTPUT.PUT_LINE('Successfully transferred $' || p_Amount || ' from Account ' || p_SourceAccountID || ' to Account ' || p_DestAccountID);
+    COMMIT;
+
+EXCEPTION
+    WHEN insufficient_funds THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Transfer Failed: Insufficient funds in Account ' || p_SourceAccountID);
+    WHEN invalid_account THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Transfer Failed: One or both Account IDs are invalid.');
+    WHEN OTHERS THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Transfer Failed due to unexpected error: ' || SQLERRM);
+END;
+/
+
+-- ====================================================================
+-- VERIFICATION / TESTING EXAMPLES
+-- ====================================================================
+PROMPT Testing Scenario 1...
+EXEC ProcessMonthlyInterest;
+
+PROMPT Testing Scenario 2...
+EXEC UpdateEmployeeBonus('IT', 5);
+
+PROMPT Testing Scenario 3 (Should fail due to insufficient funds)...
+EXEC TransferFunds(1, 2, 5000);
+
+PROMPT Testing Scenario 3 (Should succeed)...
+EXEC TransferFunds(2, 1, 100);
